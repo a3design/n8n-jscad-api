@@ -1,8 +1,8 @@
-// api/modeler.js - Daha da sağlamlaştırılmış versiyon
-import { primitives, transforms, booleans, extrusions, geometries } from '@jscad/modeling';
-import { serialize } from '@jscad/stl-serializer';
+// api/modeler.js - require versiyonu
+const { primitives, transforms, booleans, extrusions, geometries } = require('@jscad/modeling');
+const { serialize } = require('@jscad/stl-serializer');
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   // Fonksiyonun çalıştığını logla
   console.log('Function invoked. Request method:', request.method);
 
@@ -89,4 +89,4 @@ export default async function handler(request, response) {
     console.error('Modeling process crashed during execution:', error);
     return response.status(500).json({ error: 'Failed to create 3D model.', details: error.message });
   }
-}
+};
