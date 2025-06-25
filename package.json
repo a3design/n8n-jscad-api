@@ -7,7 +7,7 @@
     "start": "node api/modeler.js"
   },
   "dependencies": {
-    "@jscad/modeling": "2.0.2",
-    "@jscad/stl-serializer": "2.0.2"
+    "@jscad/modeling": "latest",
+    "@jscad/stl-serializer": "latest"
   }
 }
