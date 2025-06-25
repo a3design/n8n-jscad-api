@@ -2,7 +2,6 @@
   "name": "n8n-jscad-api",
   "version": "v1",
   "private": true,
-  "type": "module",
   "main": "api/modeler.js",
   "scripts": {
     "start": "node api/modeler.js"
