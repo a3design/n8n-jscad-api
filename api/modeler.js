@@ -1,4 +1,4 @@
-// api/modeler.js - require versiyonu
+// api/modeler.js - KÜP TESTİ EKLENDİ!
 const { primitives, transforms, booleans, extrusions, geometries } = require('@jscad/modeling');
 const { serialize } = require('@jscad/stl-serializer');
 
@@ -13,17 +13,14 @@ module.exports = async function handler(request, response) {
 
   let modelingPlan;
   try {
-    // İstek gövdesini (request.body) kontrol et ve JSON olarak ayrıştır
     if (!request.body || Object.keys(request.body).length === 0) {
        throw new Error('Request body is empty or not valid JSON.');
     }
-    
     modelingPlan = request.body.modeling_plan;
     if (!modelingPlan || !Array.isArray(modelingPlan)) {
       throw new Error('modeling_plan property not found in request body or is not an array.');
     }
   } catch (error) {
-    // Hata durumunda 400 Bad Request döndür
     console.error('Body parsing failed:', error);
     return response.status(400).json({ error: 'Invalid or missing modeling_plan in request body.', details: error.message });
   }
@@ -31,8 +28,12 @@ module.exports = async function handler(request, response) {
   // Modeli oluşturmak için boş bir geometrik nesne başlat
   let finalShape = geometries.geom3.create();
 
+  // ***** TEST KÜPÜ EKLENDİ - BU GÖRÜNMELİ! *****
+  const testCube = primitives.cube({ size: 10 }); // 10 birimlik bir küp
+  finalShape = booleans.union(finalShape, testCube);
+  // **********************************************
+
   try {
-    // ChatGPT'den gelen her adımı tek tek işle
     for (const step of modelingPlan) {
       const action = step.action;
       console.log(`Executing step: ${action}`);
@@ -40,34 +41,27 @@ module.exports = async function handler(request, response) {
       let newShape;
 
       // Adımları tanıma ve JSCAD komutlarına dönüştürme
-      if (action.includes("Create a circle for the head")) {
-        const diameterMatch = action.match(/diameter of (\d+)mm/);
+      // NOT: Bu kısım hala basitleştirilmiş durumda, detaylı CAD komutları eklenmeli.
+      if (action.includes("Draw a circle with a diameter of") && action.includes("for the head")) {
+        const diameterMatch = action.match(/diameter of (\d+)/);
         if (diameterMatch) {
           const diameter = parseFloat(diameterMatch[1]);
+          // Başı daha görünür bir hale getirelim
           newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2, center: [0, 0] }));
         }
-      } else if (action.includes("Add two eyes by creating circles")) {
-        const diameterMatch = action.match(/diameter (\d+)mm/);
+      } else if (action.includes("Draw two circles with a diameter of") && action.includes("for the eyes")) {
+        const diameterMatch = action.match(/diameter of (\d+)/);
         if (diameterMatch) {
           const diameter = parseFloat(diameterMatch[1]);
           const eyeRadius = diameter / 2;
-          const eye1 = transforms.translate([-25, 5, 5], extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: eyeRadius })));
-          const eye2 = transforms.translate([25, 5, 5], extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: eyeRadius })));
-          
+          const eye1 = transforms.translate([-20, 10, 5], extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: eyeRadius })));
+          const eye2 = transforms.translate([20, 10, 5], extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: eyeRadius })));
           newShape = booleans.union(eye1, eye2);
         }
-      } else if (action.includes("Draw the base rectangle")) {
-        const dimsMatch = action.match(/dimensions (\d+)mm x (\d+)mm/);
-        if (dimsMatch) {
-            const width = parseFloat(dimsMatch[1]);
-            const height = parseFloat(dimsMatch[2]);
-            newShape = extrusions.extrudeLinear({ height: 10 }, primitives.rectangle({ size: [width, height], center: [0, -30] }));
-        }
-      } else if (action.includes("Draw the body by creating arcs")) {
-          console.log("-> Body arc step is complex, skipping for simplicity in this version.");
       }
+      // NOT: Diğer adımlar (kuyruk, bacaklar vb.) için buraya benzer 'else if' blokları eklemen gerekecek.
+      // Şu an sadece baş ve gözler için basitleştirilmiş bir örnek var.
 
-      // Yeni oluşturulan şekli ana şekle ekle
       if (newShape) {
         finalShape = booleans.union(finalShape, newShape);
       }
@@ -80,7 +74,7 @@ module.exports = async function handler(request, response) {
     // Yanıtı ayarla
     response.setHeader('Content-Type', 'model/stl');
     response.setHeader('Content-Disposition', 'attachment; filename="model.stl"');
-    response.setHeader('Access-Control-Allow-Origin', '*'); // N8n'den gelen istekleri kabul et
+    response.setHeader('Access-Control-Allow-Origin', '*'); 
 
     // STL dosyasını yanıt olarak gönder
     return response.status(200).send(stlBuffer);
