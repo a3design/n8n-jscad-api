@@ -3,19 +3,24 @@ import { primitives, transforms, booleans, extrusions, geometries } from '@jscad
 import { serialize } from '@jscad/stl-serializer';
 
 export default async function handler(request, response) {
-  // Sadece POST isteklerini kabul et
+  // Sadece POST isteklerini kabul et. Tarayıcıdan GET geldiğinde 405 döndür.
   if (request.method !== 'POST') {
     return response.status(405).send('Method Not Allowed');
   }
 
-  // İstek gövdesini (body) al ve JSON olarak ayrıştır
+  // İstek gövdesini (body) kontrol et ve JSON olarak ayrıştır
   let modelingPlan;
   try {
+    // Kodu daha güvenli hale getir: request.body'nin varlığını kontrol et
+    if (!request.body) {
+       throw new Error('Request body is empty.');
+    }
     modelingPlan = request.body.modeling_plan;
     if (!modelingPlan || !Array.isArray(modelingPlan)) {
       throw new Error('Modeling plan not found in request body or is not an array.');
     }
   } catch (error) {
+    // Hata durumunda 400 Bad Request döndür
     console.error('Request body parsing error:', error);
     return response.status(400).json({ error: 'Invalid or missing modeling_plan in request body.' });
   }
