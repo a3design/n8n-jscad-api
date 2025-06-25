@@ -1,0 +1,14 @@
+{
+  "name": "n8n-jscad-api",
+  "version": "v1",
+  "private": true,
+  "type": "module",
+  "main": "api/modeler.js",
+  "scripts": {
+    "start": "node api/modeler.js"
+  },
+  "dependencies": {
+    "@jscad/modeling": "2.1.2",
+    "@jscad/stl-serializer": "2.1.0"
+  }
+}
