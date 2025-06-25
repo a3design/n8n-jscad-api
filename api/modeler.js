@@ -1,28 +1,31 @@
-// api/modeler.js
+// api/modeler.js - Daha da sağlamlaştırılmış versiyon
 import { primitives, transforms, booleans, extrusions, geometries } from '@jscad/modeling';
 import { serialize } from '@jscad/stl-serializer';
 
 export default async function handler(request, response) {
-  // Sadece POST isteklerini kabul et. Tarayıcıdan GET geldiğinde 405 döndür.
+  // Fonksiyonun çalıştığını logla
+  console.log('Function invoked. Request method:', request.method);
+
+  // Sadece POST isteklerini kabul et. Tarayıcıdan GET geldiğinde hemen 405 döndür.
   if (request.method !== 'POST') {
-    return response.status(405).send('Method Not Allowed');
+    return response.status(405).send('Method Not Allowed. Please use a POST request with a JSON body.');
   }
 
-  // İstek gövdesini (body) kontrol et ve JSON olarak ayrıştır
   let modelingPlan;
   try {
-    // Kodu daha güvenli hale getir: request.body'nin varlığını kontrol et
-    if (!request.body) {
-       throw new Error('Request body is empty.');
+    // İstek gövdesini (request.body) kontrol et ve JSON olarak ayrıştır
+    if (!request.body || Object.keys(request.body).length === 0) {
+       throw new Error('Request body is empty or not valid JSON.');
     }
+    
     modelingPlan = request.body.modeling_plan;
     if (!modelingPlan || !Array.isArray(modelingPlan)) {
-      throw new Error('Modeling plan not found in request body or is not an array.');
+      throw new Error('modeling_plan property not found in request body or is not an array.');
     }
   } catch (error) {
     // Hata durumunda 400 Bad Request döndür
-    console.error('Request body parsing error:', error);
-    return response.status(400).json({ error: 'Invalid or missing modeling_plan in request body.' });
+    console.error('Body parsing failed:', error);
+    return response.status(400).json({ error: 'Invalid or missing modeling_plan in request body.', details: error.message });
   }
 
   // Modeli oluşturmak için boş bir geometrik nesne başlat
@@ -41,7 +44,6 @@ export default async function handler(request, response) {
         const diameterMatch = action.match(/diameter of (\d+)mm/);
         if (diameterMatch) {
           const diameter = parseFloat(diameterMatch[1]);
-          // JSCAD'de 2D daireyi oluştur ve kalınlık ver (extrude et)
           newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2, center: [0, 0] }));
         }
       } else if (action.includes("Add two eyes by creating circles")) {
@@ -52,7 +54,6 @@ export default async function handler(request, response) {
           const eye1 = transforms.translate([-25, 5, 5], extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: eyeRadius })));
           const eye2 = transforms.translate([25, 5, 5], extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: eyeRadius })));
           
-          // Gözleri birleştir ve tek bir şekil haline getir
           newShape = booleans.union(eye1, eye2);
         }
       } else if (action.includes("Draw the base rectangle")) {
@@ -60,12 +61,9 @@ export default async function handler(request, response) {
         if (dimsMatch) {
             const width = parseFloat(dimsMatch[1]);
             const height = parseFloat(dimsMatch[2]);
-            // JSCAD'de dikdörtgen oluştur ve kalınlık ver
             newShape = extrusions.extrudeLinear({ height: 10 }, primitives.rectangle({ size: [width, height], center: [0, -30] }));
         }
       } else if (action.includes("Draw the body by creating arcs")) {
-          // Bu adım biraz daha karmaşık. Arc'ları birleştirmek için daha fazla kod gerekir.
-          // Basitçe birleştirilmiş bir şekil ekleyelim.
           console.log("-> Body arc step is complex, skipping for simplicity in this version.");
       }
 
@@ -88,7 +86,7 @@ export default async function handler(request, response) {
     return response.status(200).send(stlBuffer);
 
   } catch (error) {
-    console.error('Modeling process error:', error);
+    console.error('Modeling process crashed during execution:', error);
     return response.status(500).json({ error: 'Failed to create 3D model.', details: error.message });
   }
 }
