@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "@jscad/modeling": "2.0.2",
-    "@jscad/stl-serializer": "2.1.0"
+    "@jscad/stl-serializer": "2.0.2"
   }
 }
