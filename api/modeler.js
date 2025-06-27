@@ -14,12 +14,7 @@ module.exports = (req, res) => {
   }
 
   // --- 2. Gelen Veriyi (Payload) Çıkarma ve Doğrulama ---
-  // n8n workflow'u { "modeling_plan": [...] } şeklinde bir JSON gönderir.
-  // Diziyi alabilmek için .modeling_plan özelliğine erişmemiz ZORUNLUDUR.
-  // *** İŞTE EN ÖNEMLİ DÜZELTME BURASI ***
   const modeling_plan = req.body.modeling_plan;
-
-  // Modelleme planının var olup olmadığını, boş olmayan bir dizi olup olmadığını kontrol et
   if (!modeling_plan || !Array.isArray(modeling_plan) || modeling_plan.length === 0) {
     const errorMessage = "Hata: İstek gövdesinde 'modeling_plan' bulunamadı, bir dizi değil veya boş.";
     console.error(`DEBUG: ${errorMessage}`);
@@ -27,8 +22,8 @@ module.exports = (req, res) => {
   }
 
   // --- 3. 3D Modelleme Mantığı ---
-  let finalShape;     // Son 3D nesneyi tutacak
-  let currentSketch;  // Ekstrüzyon veya kesme için kullanılacak mevcut 2D çizimi (dikdörtgen, daire vb.) tutacak
+  let finalShape;
+  let currentSketch;
 
   try {
     modeling_plan.forEach(step => {
@@ -36,7 +31,9 @@ module.exports = (req, res) => {
 
       switch (step.action) {
         case 'create_rectangle':
-          // 2D bir dikdörtgen çizimi oluştur. Bu henüz 3D bir şekil değildir.
+          // 2D bir dikdörtgen çizimi oluştur.
+          // *** HATA DÜZELTMESİ: 'center' özelliği kaldırıldı. ***
+          // Artık sol alt köşe (0,0) olacak ve AI verisiyle uyumlu çalışacak.
           currentSketch = rectangle({
             size: [step.width, step.height],
           });
@@ -44,9 +41,7 @@ module.exports = (req, res) => {
           break;
 
         case 'create_circle':
-          // 2D bir daire çizimi oluştur.
-          // NOT: Kesme gibi işlemler için modelleme planının bu daireyi konumlandırmak
-          // üzere x/y koordinatları sağlaması gerekebilir.
+          // 2D bir daire çizimi oluştur. Merkezi kendi içinde (0,0)'dır.
           currentSketch = circle({
             radius: step.diameter / 2
           });
@@ -54,38 +49,28 @@ module.exports = (req, res) => {
           break;
 
         case 'extrude':
-          // En son oluşturulan 2D çizimi al ve ona derinlik vererek 3D bir şekle dönüştür.
           if (!currentSketch) {
             throw new Error(`Adım ${step.step} (extrude): Önce bir çizim oluşturulmadığı için ekstrüzyon yapılamıyor.`);
           }
-          // Genellikle ilk ekstrüzyon işlemi ana şekli oluşturur.
           finalShape = extrudeLinear({ height: step.depth }, currentSketch);
           console.log(`DEBUG: Çizim, ${step.depth} derinliğine kadar uzatıldı.`);
           break;
 
         case 'cut_through_all':
-          // En son oluşturulan 2D çizimi al, onu uzun bir "kesme aletine" dönüştür
-          // ve ana şekilden çıkar.
-          if (!currentSketch) {
-            throw new Error(`Adım ${step.step} (cut_through_all): Kesilecek şekil için bir çizim oluşturulmadığından kesme yapılamıyor.`);
-          }
-          if (!finalShape) {
-            throw new Error(`Adım ${step.step} (cut_through_all): Ana 3D şekil (finalShape) henüz oluşturulmadığı için kesme yapılamıyor.`);
+          if (!currentSketch || !finalShape) {
+            throw new Error(`Adım ${step.step} (cut_through_all): Kesme işlemi için 'currentSketch' veya 'finalShape' mevcut değil.`);
           }
           
-          // Çizimi konumlandır. Modelleme planı bunun için 'x' ve 'y' koordinatları sağlamalıdır.
-          // Eğer sağlanmazsa merkezde (0,0) olduğu varsayılır.
+          // Çizimin merkezini AI'ın verdiği x,y koordinatlarına taşı.
           const positionedSketch = translate([step.x || 0, step.y || 0, 0], currentSketch);
-
-          // Çizimi modelden daha uzun bir yüksekliğe uzatarak bir kesme aleti oluştur.
-          const cuttingTool = extrudeLinear({ height: 2 * (step.depth || 1000) }, positionedSketch); 
           
-          // Kesme aletini Z ekseninde ortalayarak her iki yönden de kesmesini garantile.
+          // Kesme aletini oluştur ve Z ekseninde ortala.
+          const cuttingTool = extrudeLinear({ height: (step.depth || 1000) * 2 }, positionedSketch);
           const centeredCuttingTool = translate([0, 0, -(step.depth || 1000)], cuttingTool);
 
           // Aleti ana şekilden çıkar.
           finalShape = subtract(finalShape, centeredCuttingTool);
-          console.log(`DEBUG: "cut_through_all" işlemi gerçekleştirildi.`);
+          console.log(`DEBUG: "cut_through_all" işlemi x:${step.x}, y:${step.y} koordinatlarında gerçekleştirildi.`);
           break;
 
         default:
