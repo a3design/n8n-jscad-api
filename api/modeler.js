@@ -1,136 +1,113 @@
-// api/modeler.js - SON GÜNCEL KOD (DAHA ESNEK REGEX VE DEBUG LOGLARI)
-const { primitives, transforms, booleans, extrusions, geometries } = require('@jscad/modeling');
+const { booleans, primitives, extrusions, transforms } = require('@jscad/modeling');
 const { serialize } = require('@jscad/stl-serializer');
 
-module.exports = async function handler(request, response) {
-  console.log('Function invoked. Request method:', request.method);
+const { subtract } = booleans;
+const { circle, rectangle } = primitives;
+const { extrudeLinear } = extrusions;
+const { translate } = transforms;
 
-  if (request.method !== 'POST') {
-    return response.status(405).send('Method Not Allowed. Please use a POST request with a JSON body.');
+// Ana Vercel serverless fonksiyonu
+module.exports = (req, res) => {
+  // --- 1. İstek Doğrulama ---
+  if (req.method !== 'POST') {
+    return res.status(405).send('Method Not Allowed');
   }
 
-  let modelingPlan;
-  try {
-    if (!request.body || (typeof request.body !== 'object' && !Array.isArray(request.body))) {
-       throw new Error('Request body is empty or not a valid JSON structure.');
-    }
+  // --- 2. Gelen Veriyi (Payload) Çıkarma ve Doğrulama ---
+  // n8n workflow'u { "modeling_plan": [...] } şeklinde bir JSON gönderir.
+  // Diziyi alabilmek için .modeling_plan özelliğine erişmemiz ZORUNLUDUR.
+  // *** İŞTE EN ÖNEMLİ DÜZELTME BURASI ***
+  const modeling_plan = req.body.modeling_plan;
 
-    if (Array.isArray(request.body)) {
-        modelingPlan = request.body;
-    } else if (request.body.modeling_plan && Array.isArray(request.body.modeling_plan)) {
-        modelingPlan = request.body.modeling_plan;
-    } else {
-        throw new Error('Modeling plan not found or is not an array in request body.');
-    }
-    
-    if (!modelingPlan.length) {
-        throw new Error('Modeling plan is empty.');
-    }
-
-  } catch (error) {
-    console.error('Request body parsing or modeling plan extraction error:', error);
-    return response.status(400).json({ error: 'Invalid or missing modeling_plan in request body.', details: error.message });
+  // Modelleme planının var olup olmadığını, boş olmayan bir dizi olup olmadığını kontrol et
+  if (!modeling_plan || !Array.isArray(modeling_plan) || modeling_plan.length === 0) {
+    const errorMessage = "Hata: İstek gövdesinde 'modeling_plan' bulunamadı, bir dizi değil veya boş.";
+    console.error(`DEBUG: ${errorMessage}`);
+    return res.status(400).send(errorMessage);
   }
 
-  // Modeli oluşturmak için boş bir geometrik nesne başlat
-  let finalShape = geometries.geom3.create();
-
-  // ***** TEST KÜPÜ - HALA BURADA DURUYOR, TEST İÇİN İYİ *****
-  const testCube = primitives.cube({ size: 10 }); // 10 birimlik bir küp
-  finalShape = booleans.union(finalShape, testCube);
-  console.log('DEBUG: A 10x10x10 test cube has been added to the final shape.');
-  // **********************************************
+  // --- 3. 3D Modelleme Mantığı ---
+  let finalShape;     // Son 3D nesneyi tutacak
+  let currentSketch;  // Ekstrüzyon veya kesme için kullanılacak mevcut 2D çizimi (dikdörtgen, daire vb.) tutacak
 
   try {
-    for (const step of modelingPlan) {
-      const action = step.action;
-      console.log(`DEBUG: Executing step: "${action}"`);
+    modeling_plan.forEach(step => {
+      console.log(`DEBUG: Adım ${step.step} işleniyor: "${step.action}"`);
 
-      let newShape = null; // Başlangıçta boş
+      switch (step.action) {
+        case 'create_rectangle':
+          // 2D bir dikdörtgen çizimi oluştur. Bu henüz 3D bir şekil değildir.
+          currentSketch = rectangle({
+            size: [step.width, step.height],
+          });
+          console.log(`DEBUG: Genişlik: ${step.width}, Yükseklik: ${step.height} olan bir dikdörtgen çizimi oluşturuldu.`);
+          break;
 
-      // ---- YENİ PARSİNG MANTIĞI BAŞLANGIÇ ----
-      // Regex'leri daha esnek hale getiriyoruz (birimler ve kelimeler için)
-      
-      // 1. Daire veya Çember oluşturma
-      if (action.includes("circle with a diameter of")) {
-        let match = action.match(/diameter(?: of)?(?: a)? (\d+)(?:mm| units)?/);
-        if (match) {
-          const diameter = parseFloat(match[1]);
-          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2 }));
-          console.log(`DEBUG: Matched circle with diameter: ${diameter}`);
-        }
-      } 
-      // 2. Yay (Arc) veya Kavis oluşturma
-      else if (action.includes("arc with a radius of") || action.includes("arc with radius")) {
-        let match = action.match(/radius of (\d+)(?:mm| units)?/);
-        if (match) {
-          const radius = parseFloat(match[1]);
-          // Basitçe bir halka ekleyelim
-          newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
-          console.log(`DEBUG: Matched arc with radius: ${radius}`);
-        }
-      }
-      // 3. Dikdörtgen oluşturma
-      else if (action.includes("rectangle with a width of") && action.includes("height of")) {
-        let match = action.match(/width of (\d+)(?:mm| units)?(?:.*?)height of (\d+)(?:mm| units)?/);
-        if (match) {
-          const width = parseFloat(match[1]);
-          const height = parseFloat(match[2]);
-          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.rectangle({ size: [width, height] }));
-          console.log(`DEBUG: Matched rectangle with size: ${width}x${height}`);
-        }
-      }
-      // 4. Çizgiler oluşturma
-      else if (action.includes("line with a length of") || action.includes("line of length")) {
-          let match = action.match(/length of (\d+)(?:mm| units)?/);
-          if (match) {
-              const length = parseFloat(match[1]);
-              if (action.includes("horizontal")) {
-                  newShape = extrusions.extrudeLinear({ height: 1 }, primitives.rectangle({ size: [length, 1] }));
-                  console.log(`DEBUG: Matched horizontal line with length: ${length}`);
-              } else if (action.includes("vertical")) {
-                  newShape = extrusions.extrudeLinear({ height: length }, primitives.rectangle({ size: [1, 1] }));
-                  console.log(`DEBUG: Matched vertical line with length: ${length}`);
-              }
+        case 'create_circle':
+          // 2D bir daire çizimi oluştur.
+          // NOT: Kesme gibi işlemler için modelleme planının bu daireyi konumlandırmak
+          // üzere x/y koordinatları sağlaması gerekebilir.
+          currentSketch = circle({
+            radius: step.diameter / 2
+          });
+          console.log(`DEBUG: Çap: ${step.diameter} olan bir daire çizimi oluşturuldu.`);
+          break;
+
+        case 'extrude':
+          // En son oluşturulan 2D çizimi al ve ona derinlik vererek 3D bir şekle dönüştür.
+          if (!currentSketch) {
+            throw new Error(`Adım ${step.step} (extrude): Önce bir çizim oluşturulmadığı için ekstrüzyon yapılamıyor.`);
           }
-      }
-      // 5. Extrude komutu
-      else if (action.includes("Extrude the sketch")) {
-          // Bu komut için önceki adımlardan bir sonuç alınması gerekir.
-          // Bu bir placeholder olacak.
-          console.log("DEBUG: Extrude command matched. This requires state from previous steps.");
-          // Gerçek modelleme için bu adımı özel olarak kodlamak gerekir.
-      }
-      // 6. Basit pozisyonlandırma veya ekleme komutları
-      else if (action.includes("Position") || action.includes("Add") || action.includes("Draw")) {
-          console.log(`DEBUG: Found a positioning/drawing command that is not yet parsed: "${action}"`);
-      }
-      // ---- YENİ PARSİNG MANTIĞI BİTİŞ ----
+          // Genellikle ilk ekstrüzyon işlemi ana şekli oluşturur.
+          finalShape = extrudeLinear({ height: step.depth }, currentSketch);
+          console.log(`DEBUG: Çizim, ${step.depth} derinliğine kadar uzatıldı.`);
+          break;
 
-      // Eğer bir şekil oluşturulduysa, onu ana şekille birleştir
-      if (newShape) {
-        finalShape = booleans.union(finalShape, newShape);
-        console.log('DEBUG: newShape was added to finalShape.');
-      } else {
-        console.log('DEBUG: No newShape created for this step.');
+        case 'cut_through_all':
+          // En son oluşturulan 2D çizimi al, onu uzun bir "kesme aletine" dönüştür
+          // ve ana şekilden çıkar.
+          if (!currentSketch) {
+            throw new Error(`Adım ${step.step} (cut_through_all): Kesilecek şekil için bir çizim oluşturulmadığından kesme yapılamıyor.`);
+          }
+          if (!finalShape) {
+            throw new Error(`Adım ${step.step} (cut_through_all): Ana 3D şekil (finalShape) henüz oluşturulmadığı için kesme yapılamıyor.`);
+          }
+          
+          // Çizimi konumlandır. Modelleme planı bunun için 'x' ve 'y' koordinatları sağlamalıdır.
+          // Eğer sağlanmazsa merkezde (0,0) olduğu varsayılır.
+          const positionedSketch = translate([step.x || 0, step.y || 0, 0], currentSketch);
+
+          // Çizimi modelden daha uzun bir yüksekliğe uzatarak bir kesme aleti oluştur.
+          const cuttingTool = extrudeLinear({ height: 2 * (step.depth || 1000) }, positionedSketch); 
+          
+          // Kesme aletini Z ekseninde ortalayarak her iki yönden de kesmesini garantile.
+          const centeredCuttingTool = translate([0, 0, -(step.depth || 1000)], cuttingTool);
+
+          // Aleti ana şekilden çıkar.
+          finalShape = subtract(finalShape, centeredCuttingTool);
+          console.log(`DEBUG: "cut_through_all" işlemi gerçekleştirildi.`);
+          break;
+
+        default:
+          console.warn(`DEBUG: Adım ${step.step}'de bilinmeyen eylem "${step.action}". Atlanıyor.`);
       }
+    });
+
+    if (!finalShape) {
+      throw new Error("Modelleme planı işlendi ancak son bir 3D şekil üretilemedi.");
     }
 
-    // Şekli STL formatına çevir
-    const serializedData = serialize({ binary: true }, finalShape);
-    const stlBuffer = Buffer.from(serializedData);
-    console.log('DEBUG: Serialization completed. STL buffer size:', stlBuffer.length);
+    // --- 4. STL'e Çevirme ve Yanıt Gönderme ---
+    console.log('DEBUG: STL serileştirme başladı.');
+    const rawData = serialize({ binary: true }, finalShape);
+    console.log(`DEBUG: Serileştirme tamamlandı. STL arabellek boyutu: ${rawData.length}`);
 
-    // Yanıtı ayarla
-    response.setHeader('Content-Type', 'model/stl');
-    response.setHeader('Content-Disposition', 'attachment; filename="model.stl"');
-    response.setHeader('Access-Control-Allow-Origin', '*'); 
-
-    // STL dosyasını yanıt olarak gönder
-    return response.status(200).send(stlBuffer);
+    res.setHeader('Content-Type', 'application/stl');
+    res.setHeader('Content-Disposition', 'attachment; filename=model.stl');
+    res.status(200).send(Buffer.from(rawData));
 
   } catch (error) {
-    console.error('Modeling process crashed during execution:', error);
-    return response.status(500).json({ error: 'Failed to create 3D model.', details: error.message });
+    console.error('FATAL ERROR: Modelleme sırasında ölümcül bir hata oluştu:', error.message);
+    res.status(500).send(`Sunucu Hatası: ${error.message}`);
   }
 };
