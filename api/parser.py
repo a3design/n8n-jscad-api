@@ -1,13 +1,13 @@
 from flask import Flask, request, jsonify
 import ezdxf
-import base64  # Base64 kütüphanesini import et
+import base64
 import io
+import re  # <--- EKLENEN KRİTİK SATIR
 
 app = Flask(__name__)
 
 @app.route('/api/parser', methods=['POST'])
 def parse_dxf():
-    # Artık request.files değil, request.get_json() kullanıyoruz
     json_data = request.get_json()
     if not json_data:
         return jsonify({"error": "JSON body bulunamadı"}), 400
@@ -19,24 +19,19 @@ def parse_dxf():
     base64_content = json_data['fileContent']
 
     try:
-        # Adım 1: Base64 metnini tekrar binary veriye dönüştür
         decoded_content = base64.b64decode(base64_content)
         
-        # Adım 2: Dosya adından kalınlığı (depth) al
-        depth = 10  # Varsayılan değer
-        # Dosya adından kalınlık okuma mantığı aynı kalır
+        depth = 10
         match = re.search(r'_(\d+)mm', filename)
         if match:
             depth = int(match.group(1))
 
-        # Hafızadaki binary veriyi ezdxf ile oku
         doc = ezdxf.read(io.BytesIO(decoded_content))
         msp = doc.modelspace()
 
         modeling_plan = []
         step_counter = 1
         
-        # Geri kalan tüm DXF okuma ve JSON oluşturma mantığı birebir aynı
         base_shape_entity = msp.query('LWPOLYLINE[layer=="OUTLINE"]').first
         if not base_shape_entity:
             return jsonify({"error": "OUTLINE katmanında ana şekil bulunamadı"}), 400
