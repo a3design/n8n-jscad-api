@@ -24,6 +24,8 @@ module.exports = (req, res) => {
   // --- 3. 3D Modelleme Mantığı ---
   let finalShape;
   let currentSketch;
+  // *** YENİ: Son çizimin koordinatlarını hafızada tutmak için bir değişken ***
+  let lastSketchCoords = { x: 0, y: 0 };
 
   try {
     modeling_plan.forEach(step => {
@@ -31,46 +33,40 @@ module.exports = (req, res) => {
 
       switch (step.action) {
         case 'create_rectangle':
-          // 2D bir dikdörtgen çizimi oluştur.
-          // *** HATA DÜZELTMESİ: 'center' özelliği kaldırıldı. ***
-          // Artık sol alt köşe (0,0) olacak ve AI verisiyle uyumlu çalışacak.
-          currentSketch = rectangle({
-            size: [step.width, step.height],
-          });
+          currentSketch = rectangle({ size: [step.width, step.height] });
+          // Eğer bu adımda koordinat bilgisi varsa, hafızaya al.
+          if (step.x !== undefined && step.y !== undefined) {
+            lastSketchCoords = { x: step.x, y: step.y };
+          }
           console.log(`DEBUG: Genişlik: ${step.width}, Yükseklik: ${step.height} olan bir dikdörtgen çizimi oluşturuldu.`);
           break;
 
         case 'create_circle':
-          // 2D bir daire çizimi oluştur. Merkezi kendi içinde (0,0)'dır.
-          currentSketch = circle({
-            radius: step.diameter / 2
-          });
+          currentSketch = circle({ radius: step.diameter / 2 });
+          // Eğer bu adımda koordinat bilgisi varsa, hafızaya al.
+          if (step.x !== undefined && step.y !== undefined) {
+            lastSketchCoords = { x: step.x, y: step.y };
+          }
           console.log(`DEBUG: Çap: ${step.diameter} olan bir daire çizimi oluşturuldu.`);
           break;
 
         case 'extrude':
-          if (!currentSketch) {
-            throw new Error(`Adım ${step.step} (extrude): Önce bir çizim oluşturulmadığı için ekstrüzyon yapılamıyor.`);
-          }
+          if (!currentSketch) throw new Error(`Adım ${step.step} (extrude): Ekstrüzyon için çizim bulunamadı.`);
           finalShape = extrudeLinear({ height: step.depth }, currentSketch);
           console.log(`DEBUG: Çizim, ${step.depth} derinliğine kadar uzatıldı.`);
           break;
 
         case 'cut_through_all':
-          if (!currentSketch || !finalShape) {
-            throw new Error(`Adım ${step.step} (cut_through_all): Kesme işlemi için 'currentSketch' veya 'finalShape' mevcut değil.`);
-          }
+          if (!currentSketch || !finalShape) throw new Error(`Adım ${step.step} (cut_through_all): Kesme işlemi için 'currentSketch' veya 'finalShape' mevcut değil.`);
           
-          // Çizimin merkezini AI'ın verdiği x,y koordinatlarına taşı.
-          const positionedSketch = translate([step.x || 0, step.y || 0, 0], currentSketch);
+          // *** DÜZELTME: Hafızadaki son koordinatları kullan ***
+          const positionedSketch = translate([lastSketchCoords.x, lastSketchCoords.y, 0], currentSketch);
           
-          // Kesme aletini oluştur ve Z ekseninde ortala.
-          const cuttingTool = extrudeLinear({ height: (step.depth || 1000) * 2 }, positionedSketch);
-          const centeredCuttingTool = translate([0, 0, -(step.depth || 1000)], cuttingTool);
-
-          // Aleti ana şekilden çıkar.
+          const cuttingTool = extrudeLinear({ height: 2000 }, positionedSketch);
+          const centeredCuttingTool = translate([0, 0, -1000], cuttingTool);
+          
           finalShape = subtract(finalShape, centeredCuttingTool);
-          console.log(`DEBUG: "cut_through_all" işlemi x:${step.x}, y:${step.y} koordinatlarında gerçekleştirildi.`);
+          console.log(`DEBUG: "cut_through_all" işlemi x:${lastSketchCoords.x}, y:${lastSketchCoords.y} koordinatlarında gerçekleştirildi.`);
           break;
 
         default:
@@ -78,14 +74,17 @@ module.exports = (req, res) => {
       }
     });
 
-    if (!finalShape) {
-      throw new Error("Modelleme planı işlendi ancak son bir 3D şekil üretilemedi.");
-    }
+    if (!finalShape) throw new Error("Modelleme planı işlendi ancak son bir 3D şekil üretilemedi.");
 
     // --- 4. STL'e Çevirme ve Yanıt Gönderme ---
     console.log('DEBUG: STL serileştirme başladı.');
     const rawData = serialize({ binary: true }, finalShape);
     console.log(`DEBUG: Serileştirme tamamlandı. STL arabellek boyutu: ${rawData.length}`);
+
+    // Başarılı bir modelin arabellek boyutu 3'ten büyük olmalıdır.
+    if (rawData.length <= 3) {
+      throw new Error("Geometri hatası nedeniyle boş bir STL dosyası oluşturuldu.");
+    }
 
     res.setHeader('Content-Type', 'application/stl');
     res.setHeader('Content-Disposition', 'attachment; filename=model.stl');
