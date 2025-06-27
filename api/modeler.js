@@ -1,4 +1,4 @@
-// api/modeler.js - SON HALİ (Hata Düzeltmesi Yapıldı!)
+// api/modeler.js - SON GÜNCEL KOD (DAHA ESNEK REGEX VE DEBUG LOGLARI)
 const { primitives, transforms, booleans, extrusions, geometries } = require('@jscad/modeling');
 const { serialize } = require('@jscad/stl-serializer');
 
@@ -18,8 +18,7 @@ module.exports = async function handler(request, response) {
     if (Array.isArray(request.body)) {
         modelingPlan = request.body;
     } else if (request.body.modeling_plan && Array.isArray(request.body.modeling_plan)) {
-        // HATA BURADAYDI, DÜZELTİLDİ: request.body.body.modeling_plan yerine request.body.modeling_plan
-        modelingPlan = request.body.modeling_plan; 
+        modelingPlan = request.body.modeling_plan;
     } else {
         throw new Error('Modeling plan not found or is not an array in request body.');
     }
@@ -37,76 +36,90 @@ module.exports = async function handler(request, response) {
   let finalShape = geometries.geom3.create();
 
   // ***** TEST KÜPÜ - HALA BURADA DURUYOR, TEST İÇİN İYİ *****
-  const testCube = primitives.cube({ size: 10 });
+  const testCube = primitives.cube({ size: 10 }); // 10 birimlik bir küp
   finalShape = booleans.union(finalShape, testCube);
+  console.log('DEBUG: A 10x10x10 test cube has been added to the final shape.');
   // **********************************************
 
   try {
     for (const step of modelingPlan) {
       const action = step.action;
-      console.log(`Executing step: ${action}`);
+      console.log(`DEBUG: Executing step: "${action}"`);
 
-      let newShape;
-      let match;
+      let newShape = null; // Başlangıçta boş
 
-      // ---- PARSİNG MANTIĞI ----
-      if (action.includes("Create a circle with a diameter of") && action.includes("for the head")) {
-        match = action.match(/diameter of (\d+)/);
+      // ---- YENİ PARSİNG MANTIĞI BAŞLANGIÇ ----
+      // Regex'leri daha esnek hale getiriyoruz (birimler ve kelimeler için)
+      
+      // 1. Daire veya Çember oluşturma
+      if (action.includes("circle with a diameter of")) {
+        let match = action.match(/diameter(?: of)?(?: a)? (\d+)(?:mm| units)?/);
         if (match) {
           const diameter = parseFloat(match[1]);
-          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2, center: [0, 0] }));
+          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2 }));
+          console.log(`DEBUG: Matched circle with diameter: ${diameter}`);
         }
-      } else if (action.includes("Draw two circles with a diameter of") && action.includes("for the eyes")) {
-        match = action.match(/diameter of (\d+)/);
+      } 
+      // 2. Yay (Arc) veya Kavis oluşturma
+      else if (action.includes("arc with a radius of") || action.includes("arc with radius")) {
+        let match = action.match(/radius of (\d+)(?:mm| units)?/);
         if (match) {
-          const diameter = parseFloat(match[1]);
-          const eyeRadius = diameter / 2;
-          const eye1 = transforms.translate([-20, 10, 5], extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: eyeRadius })));
-          const eye2 = transforms.translate([20, 10, 5], extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: eyeRadius })));
-          newShape = booleans.union(eye1, eye2);
+          const radius = parseFloat(match[1]);
+          // Basitçe bir halka ekleyelim
+          newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
+          console.log(`DEBUG: Matched arc with radius: ${radius}`);
         }
-      } else if (action.includes("Create a") && action.includes("rectangle with a width of") && action.includes("height of")) {
-        match = action.match(/width of (\d+) units and a height of (\d+) units/);
+      }
+      // 3. Dikdörtgen oluşturma
+      else if (action.includes("rectangle with a width of") && action.includes("height of")) {
+        let match = action.match(/width of (\d+)(?:mm| units)?(?:.*?)height of (\d+)(?:mm| units)?/);
         if (match) {
           const width = parseFloat(match[1]);
           const height = parseFloat(match[2]);
           newShape = extrusions.extrudeLinear({ height: 10 }, primitives.rectangle({ size: [width, height] }));
+          console.log(`DEBUG: Matched rectangle with size: ${width}x${height}`);
         }
-      } else if (action.includes("Draw an arc with a radius of")) {
-        match = action.match(/radius of (\d+)/);
-        if (match) {
-            const radius = parseFloat(match[1]);
-            newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
-        }
-      } else if (action.includes("Create a top arc with radius")) {
-          match = action.match(/radius of (\d+)/);
-          if (match) {
-              const radius = parseFloat(match[1]);
-              newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
-          }
-      } else if (action.includes("Draw a base horizontal line with length")) {
-          match = action.match(/length of (\d+)/);
+      }
+      // 4. Çizgiler oluşturma
+      else if (action.includes("line with a length of") || action.includes("line of length")) {
+          let match = action.match(/length of (\d+)(?:mm| units)?/);
           if (match) {
               const length = parseFloat(match[1]);
-              newShape = extrusions.extrudeLinear({ height: 1 }, primitives.rectangle({ size: [length, 1] }));
+              if (action.includes("horizontal")) {
+                  newShape = extrusions.extrudeLinear({ height: 1 }, primitives.rectangle({ size: [length, 1] }));
+                  console.log(`DEBUG: Matched horizontal line with length: ${length}`);
+              } else if (action.includes("vertical")) {
+                  newShape = extrusions.extrudeLinear({ height: length }, primitives.rectangle({ size: [1, 1] }));
+                  console.log(`DEBUG: Matched vertical line with length: ${length}`);
+              }
           }
-      } else if (action.includes("Create a vertical line with a length of")) {
-          match = action.match(/length of (\d+)/);
-          if (match) {
-              const length = parseFloat(match[1]);
-              newShape = extrusions.extrudeLinear({ height: length }, primitives.rectangle({ size: [1, 1] }));
-          }
-      } 
-      // ---- PARSİNG MANTIĞI BİTİŞ ----
+      }
+      // 5. Extrude komutu
+      else if (action.includes("Extrude the sketch")) {
+          // Bu komut için önceki adımlardan bir sonuç alınması gerekir.
+          // Bu bir placeholder olacak.
+          console.log("DEBUG: Extrude command matched. This requires state from previous steps.");
+          // Gerçek modelleme için bu adımı özel olarak kodlamak gerekir.
+      }
+      // 6. Basit pozisyonlandırma veya ekleme komutları
+      else if (action.includes("Position") || action.includes("Add") || action.includes("Draw")) {
+          console.log(`DEBUG: Found a positioning/drawing command that is not yet parsed: "${action}"`);
+      }
+      // ---- YENİ PARSİNG MANTIĞI BİTİŞ ----
 
+      // Eğer bir şekil oluşturulduysa, onu ana şekille birleştir
       if (newShape) {
         finalShape = booleans.union(finalShape, newShape);
+        console.log('DEBUG: newShape was added to finalShape.');
+      } else {
+        console.log('DEBUG: No newShape created for this step.');
       }
     }
 
     // Şekli STL formatına çevir
     const serializedData = serialize({ binary: true }, finalShape);
     const stlBuffer = Buffer.from(serializedData);
+    console.log('DEBUG: Serialization completed. STL buffer size:', stlBuffer.length);
 
     // Yanıtı ayarla
     response.setHeader('Content-Type', 'model/stl');
