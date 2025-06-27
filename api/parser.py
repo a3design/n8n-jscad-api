@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import ezdxf
 import base64
 import io
-import re  # <--- EKLENEN KRİTİK SATIR
+import re
 
 app = Flask(__name__)
 
@@ -19,7 +19,12 @@ def parse_dxf():
     base64_content = json_data['fileContent']
 
     try:
-        decoded_content = base64.b64decode(base64_content)
+        # --- KRİTİK DÜZELTME BURADA ---
+        # 1. Gelen Base64 metnini (string) önce ASCII byte dizisine çeviriyoruz.
+        base64_bytes = base64_content.encode('ascii')
+        # 2. Artık bu byte dizisini güvenle decode ederek orijinal dosya byte'larını elde ediyoruz.
+        decoded_content = base64.b64decode(base64_bytes)
+        # --- DÜZELTME SONU ---
         
         depth = 10
         match = re.search(r'_(\d+)mm', filename)
@@ -56,7 +61,7 @@ def parse_dxf():
                 diameter = entity.dxf.radius * 2
                 modeling_plan.append({"step": step_counter, "action": "create_circle", "diameter": diameter, "x": center.x, "y": center.y})
                 step_counter += 1
-                modeling_plan.append({"step": step_counter, "action": "cut_through_all"})
+                modeling_plan.append({"step": "cut_through_all"})
                 step_counter += 1
 
         return jsonify({"modeling_plan": modeling_plan})
