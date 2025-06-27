@@ -1,4 +1,4 @@
-// api/modeler.js - SON GÜNCEL KOD (DAHA FAZLA AKSİYONU İŞLER)
+// api/modeler.js - SON HALİ (Hata Düzeltmesi Yapıldı!)
 const { primitives, transforms, booleans, extrusions, geometries } = require('@jscad/modeling');
 const { serialize } = require('@jscad/stl-serializer');
 
@@ -18,7 +18,8 @@ module.exports = async function handler(request, response) {
     if (Array.isArray(request.body)) {
         modelingPlan = request.body;
     } else if (request.body.modeling_plan && Array.isArray(request.body.modeling_plan)) {
-        modelingPlan = request.body.body.modeling_plan; // Fix path
+        // HATA BURADAYDI, DÜZELTİLDİ: request.body.body.modeling_plan yerine request.body.modeling_plan
+        modelingPlan = request.body.modeling_plan; 
     } else {
         throw new Error('Modeling plan not found or is not an array in request body.');
     }
@@ -35,7 +36,7 @@ module.exports = async function handler(request, response) {
   // Modeli oluşturmak için boş bir geometrik nesne başlat
   let finalShape = geometries.geom3.create();
 
-  // ***** TEST KÜPÜ - HALA BURADA DURUYOR *****
+  // ***** TEST KÜPÜ - HALA BURADA DURUYOR, TEST İÇİN İYİ *****
   const testCube = primitives.cube({ size: 10 });
   finalShape = booleans.union(finalShape, testCube);
   // **********************************************
@@ -48,14 +49,14 @@ module.exports = async function handler(request, response) {
       let newShape;
       let match;
 
-      // ---- YENİ PARSİNG MANTIĞI BURADAN BAŞLIYOR ----
-      if (action.includes("Create a circle with a diameter of")) {
+      // ---- PARSİNG MANTIĞI ----
+      if (action.includes("Create a circle with a diameter of") && action.includes("for the head")) {
         match = action.match(/diameter of (\d+)/);
         if (match) {
           const diameter = parseFloat(match[1]);
-          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2 }));
+          newShape = extrusions.extrudeLinear({ height: 10 }, primitives.circle({ radius: diameter / 2, center: [0, 0] }));
         }
-      } else if (action.includes("Draw two circles with a diameter of")) {
+      } else if (action.includes("Draw two circles with a diameter of") && action.includes("for the eyes")) {
         match = action.match(/diameter of (\d+)/);
         if (match) {
           const diameter = parseFloat(match[1]);
@@ -72,14 +73,13 @@ module.exports = async function handler(request, response) {
           newShape = extrusions.extrudeLinear({ height: 10 }, primitives.rectangle({ size: [width, height] }));
         }
       } else if (action.includes("Draw an arc with a radius of")) {
-        match = action.match(/radius of (\d+)mm/); // Added 'mm' to match new logs
+        match = action.match(/radius of (\d+)/);
         if (match) {
             const radius = parseFloat(match[1]);
-            // JSCAD'de 'arc' geometrisi biraz karmaşık. Basit bir silindir ekleyelim.
             newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
         }
-      } else if (action.includes("Create a top arc with radius")) { // Yeni komutu işle
-          match = action.match(/radius of (\d+)mm/);
+      } else if (action.includes("Create a top arc with radius")) {
+          match = action.match(/radius of (\d+)/);
           if (match) {
               const radius = parseFloat(match[1]);
               newShape = extrusions.extrudeLinear({ height: 5 }, primitives.circle({ radius: radius }));
@@ -88,7 +88,6 @@ module.exports = async function handler(request, response) {
           match = action.match(/length of (\d+)/);
           if (match) {
               const length = parseFloat(match[1]);
-              // 2D çizim, extrude edelim
               newShape = extrusions.extrudeLinear({ height: 1 }, primitives.rectangle({ size: [length, 1] }));
           }
       } else if (action.includes("Create a vertical line with a length of")) {
@@ -98,7 +97,7 @@ module.exports = async function handler(request, response) {
               newShape = extrusions.extrudeLinear({ height: length }, primitives.rectangle({ size: [1, 1] }));
           }
       } 
-      // ---- YENİ PARSİNG MANTIĞI BİTİŞ ----
+      // ---- PARSİNG MANTIĞI BİTİŞ ----
 
       if (newShape) {
         finalShape = booleans.union(finalShape, newShape);
